@@ -18,20 +18,36 @@ export async function updateUser(data) {
   if (!user) throw new Error("User not found");
 
   try {
+    let industrySlug = (typeof data.industry === "string" && data.industry.trim() !== "") ? data.industry.trim() : null;
+    console.log("[updateUser] using industrySlug:", industrySlug);
+
+    // Generate AI insights outside of transaction if needed
+    let insights = null;
+    if (industrySlug) {
+      const existingInsight = await db.industryInsight.findUnique({
+        where: { industry: industrySlug },
+      });
+      console.log("[updateUser] found existing industryInsight:", !!existingInsight);
+
+      if (!existingInsight) {
+        console.log("[updateUser] generating AI insights for:", industrySlug);
+        try {
+          insights = await generateAIInsights(industrySlug);
+          console.log("[updateUser] AI insights generated successfully");
+        } catch (aiError) {
+          console.error("[updateUser] AI generation failed:", aiError.message);
+          // Continue without insights - the transaction will handle the fallback
+          insights = null;
+        }
+      }
+    }
+
+    // Now run the database operations in a transaction
     await db.$transaction(
       async (tx) => {
-        let industrySlug = (typeof data.industry === "string" && data.industry.trim() !== "") ? data.industry.trim() : null;
-        console.log("[updateUser] using industrySlug:", industrySlug);
-
-        // Only update if industrySlug is not null
-        if (industrySlug) {
-          let industryInsight = await tx.industryInsight.findUnique({
-            where: { industry: industrySlug },
-          });
-          console.log("[updateUser] found industryInsight:", !!industryInsight);
-
-          if (!industryInsight) {
-            const insights = await generateAIInsights(industrySlug);
+        // Create industry insight if we generated one
+        if (insights && industrySlug) {
+          try {
             await tx.industryInsight.create({
               data: {
                 industry: industrySlug,
@@ -40,6 +56,13 @@ export async function updateUser(data) {
               },
             });
             console.log("[updateUser] created new industryInsight for:", industrySlug);
+          } catch (createError) {
+            // Handle race condition where another request created the insight
+            if (createError.code === 'P2002') {
+              console.log("[updateUser] industryInsight already exists (race condition), continuing...");
+            } else {
+              throw createError;
+            }
           }
         }
 
@@ -60,7 +83,7 @@ export async function updateUser(data) {
         });
         console.log("[updateUser] updated user industry to:", updatedUser.industry);
       },
-      { timeout: 10000 }
+      { timeout: 15000 } // Increased timeout to 15 seconds
     );
 
     // Revalidate both pages that gate on onboarding
