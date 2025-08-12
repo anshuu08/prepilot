@@ -56,7 +56,7 @@ const OnBoardingForm = ({ industries }) => {
     formState: { errors },
     setValue,
     watch,
-    reset, // <-- add reset here
+    reset,
   } = useForm({
     resolver: zodResolver(onboardingSchema),
     defaultValues: {
@@ -68,13 +68,19 @@ const OnBoardingForm = ({ industries }) => {
     },
   });
 
-  // Update selectedIndustry when industry changes
-  useEffect(() => {
-    const sel = industries.find((ind) => ind.id === watch("industry")) || null;
-    setSelectedIndustry(sel);
-  }, [watch("industry"), industries]);
+  // Add watch values
+  const industryValue = watch("industry");
+  const subIndustryValue = watch("subIndustry");
+  const experienceValue = watch("experience");
+  const skills = watch("skills");
+  const bio = watch("bio");
+  
 
-  // Surface server action errors
+  useEffect(() => {
+    const sel = industries.find((ind) => ind.id === industryValue) || null;
+    setSelectedIndustry(sel);
+  }, [industryValue, industries]);
+
   useEffect(() => {
     if (updateError) {
       toast.error("Something went wrong while saving profile.");
@@ -82,28 +88,26 @@ const OnBoardingForm = ({ industries }) => {
     }
   }, [updateError]);
 
-  // Navigate on success (the server action should return { success: true })
   useEffect(() => {
     if (updateResult?.success && !updateLoading) {
       toast.success("Profile completed successfully!");
-      reset(); // <-- clear the form
+      reset();
       router.push("/dashboard");
-      router.refresh(); // ensure fresh server data
+      router.refresh();
     }
   }, [updateResult, updateLoading, router, reset]);
 
   const onSubmit = async (values) => {
-    // Fallback: if industry is missing, use selectedIndustry.id
-    const industryValue = values.industry || selectedIndustry?.id || industries[0]?.id || "";
+    const industryVal = values.industry || selectedIndustry?.id || industries[0]?.id || "";
     const sub = slugify(values.subIndustry || "");
-    let formattedIndustry = industryValue;
-    if (industryValue && sub.length > 0) {
-      formattedIndustry = `${industryValue}-${sub}`;
+    let formattedIndustry = industryVal;
+    if (industryVal && sub.length > 0) {
+      formattedIndustry = `${industryVal}-${sub}`;
     }
-    if (!industryValue) {
+    if (!industryVal) {
       formattedIndustry = null;
     }
-    console.log("[OnboardingForm] onSubmit values:", { ...values, industry: industryValue });
+    console.log("[OnboardingForm] onSubmit values:", { ...values, industry: industryVal });
     await updateUserFn({
       industry: formattedIndustry,
       experience: Number(values.experience) || null,
@@ -122,8 +126,7 @@ const OnBoardingForm = ({ industries }) => {
             Complete your profile
           </CardTitle>
           <CardDescription>
-            Select your industry to get personalized career insights and
-            recommendations
+            Select your industry to get personalized career insights and recommendations
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -140,7 +143,6 @@ const OnBoardingForm = ({ industries }) => {
                       value={field.value}
                       onValueChange={(value) => {
                         field.onChange(value);
-                        // Only reset subIndustry, not industry
                         setValue("subIndustry", "");
                         setSelectedIndustry(industries.find((ind) => ind.id === value) || null);
                       }}
@@ -165,103 +167,121 @@ const OnBoardingForm = ({ industries }) => {
               </div>
 
               {/* Sub-Industry */}
-              <div className="space-y-4 ml-6">
-                <Label htmlFor="subIndustry">Specialization</Label>
-                <Controller
-                  control={control}
-                  name="subIndustry"
-                  render={({ field }) => (
-                    <Select
-                      value={field.value}
-                      onValueChange={field.onChange}
-                    >
-                      <SelectTrigger id="subIndustry">
-                        <SelectValue placeholder="Select a sub industry" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {(selectedIndustry?.subIndustries || []).map((label) => (
-                          <SelectItem value={label} key={label}>
-                            {label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+              {industryValue && (
+                <div className="space-y-4 ml-6">
+                  <Label htmlFor="subIndustry">Specialization</Label>
+                  <Controller
+                    control={control}
+                    name="subIndustry"
+                    render={({ field }) => (
+                      <Select
+                        value={field.value}
+                        onValueChange={field.onChange}
+                      >
+                        <SelectTrigger id="subIndustry">
+                          <SelectValue placeholder="Select a sub industry" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {(selectedIndustry?.subIndustries || []).map((label) => (
+                            <SelectItem value={label} key={label}>
+                              {label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  />
+                  <input type="hidden" {...register("subIndustry")} />
+                  {errors.subIndustry && (
+                    <p className="text-sm text-red-500">{errors.subIndustry.message}</p>
                   )}
-                />
-                <input type="hidden" {...register("subIndustry")} />
-                {errors.subIndustry && (
-                  <p className="text-sm text-red-500">{errors.subIndustry.message}</p>
-                )}
-              </div>
+                </div>
+              )}
             </div>
-            <br />
+
             {/* Experience */}
-            <div className="space-y-4">
-              <Label htmlFor="experience">Experience</Label>
-              <Input
-                id="experience"
-                type="number"
-                min="0"
-                max="50"
-                placeholder="Enter years of experience"
-                {...register("experience")}
-              />
-              {errors.experience && (
-                <p className="text-sm text-red-500">
-                  {errors.experience.message}
-                </p>
-              )}
-            </div>
-            <br />
+            {industryValue && subIndustryValue && (
+              <>
+                <br />
+                <div className="space-y-4">
+                  <Label htmlFor="experience">Experience</Label>
+                  <Input
+                    id="experience"
+                    type="number"
+                    min="0"
+                    max="50"
+                    placeholder="Enter years of experience"
+                    {...register("experience")}
+                  />
+                  {errors.experience && (
+                    <p className="text-sm text-red-500">
+                      {errors.experience.message}
+                    </p>
+                  )}
+                </div>
+              </>
+            )}
+
             {/* Skills */}
-            <div className="space-y-4">
-              <Label htmlFor="skills">Skills</Label>
-              <Input
-                id="skills"
-                placeholder="E.g. Python, JavaScript, Product Management, Data Analysis..."
-                {...register("skills")}
-              />
-              <p className="text-sm text-muted-foreground">
-                Separate multiple skills with commas
-              </p>
-              {errors.skills && (
-                <p className="text-sm text-red-500">
-                  {errors.skills.message}
-                </p>
-              )}
-            </div>
-            <br />
+            {industryValue && subIndustryValue && experienceValue && (
+              <>
+                <br />
+                <div className="space-y-4">
+                  <Label htmlFor="skills">Skills</Label>
+                  <Input
+                    id="skills"
+                    placeholder="E.g. Python, JavaScript, Product Management, Data Analysis..."
+                    {...register("skills")}
+                  />
+                  <p className="text-sm text-muted-foreground">
+                    Separate multiple skills with commas
+                  </p>
+                  {errors.skills && (
+                    <p className="text-sm text-red-500">
+                      {errors.skills.message}
+                    </p>
+                  )}
+                </div>
+              </>
+            )}
+
             {/* Bio */}
-            <div className="space-y-4">
-              <Label htmlFor="bio">Professional Bio</Label>
-              <Textarea
-                id="bio"
-                placeholder="Write a short professional bio..."
-                {...register("bio")}
-              />
-              {errors.bio && (
-                <p className="text-sm text-red-500">
-                  {errors.bio.message}
-                </p>
-              )}
-            </div>
+            {industryValue && subIndustryValue && experienceValue && skills&&(
+              <>
+                <br />
+                <div className="space-y-4">
+                  <Label htmlFor="bio">Professional Bio</Label>
+                  <Textarea
+                    id="bio"
+                    placeholder="Write a short professional bio..."
+                    {...register("bio")}
+                  />
+                  {errors.bio && (
+                    <p className="text-sm text-red-500">{errors.bio.message}</p>
+                  )}
+                </div>
+              </>
+            )}
+
             {/* Submit */}
-            <CardFooter className="mt-6">
-              <button
-                type="submit"
-                disabled={updateLoading}
-                className="px-4 py-2 bg-white text-black rounded-lg border border-gray-300 hover:bg-gray-100 transition w-full"
-              >
-                {updateLoading ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Saving...
-                  </>
-                ) : (
-                  "Complete Profile"
-                )}
-              </button>
-            </CardFooter>
+            {industryValue && subIndustryValue && experienceValue && skills&&bio&&(
+              <CardFooter className="mt-6">
+                <button
+                  type="submit"
+                  disabled={updateLoading}
+                  className="px-4 py-2 bg-white text-black rounded-lg border border-gray-300 hover:bg-gray-100 transition w-full"
+                >
+                  {updateLoading ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Saving...
+                    </>
+                  ) : (
+                    "Complete Profile"
+                  )}
+                </button>
+              </CardFooter>
+            )}
           </form>
         </CardContent>
       </Card>

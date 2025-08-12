@@ -8,7 +8,8 @@ const ParentComponent = () => {
 const DashboardView = ({ insights, loading, error }) => {
   if (loading) return <div>Loading...</div>;
   if (error) return <div>Error: {error}</div>;
-  if (!insights || !Array.isArray(insights.salaryData)) {
+  if (!insights || !insights.salaryData || insights.salaryData.length === 0) {
+
     return <div>No data available</div>;
   }
 
