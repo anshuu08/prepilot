@@ -9,7 +9,6 @@ export async function updateUser(data) {
   const { userId } = await auth();
   if (!userId) throw new Error("Unauthorized");
 
-  // Debug: log incoming industry value
   console.log("[updateUser] received industry:", data.industry);
 
   const user = await db.user.findUnique({
@@ -66,11 +65,11 @@ export async function updateUser(data) {
           }
         }
 
-        const skillsArray = Array.isArray(data.skills)
-          ? data.skills
-          : typeof data.skills === "string"
-          ? data.skills.split(",").map((s) => s.trim()).filter(Boolean)
-          : [];
+      const skillsArray = Array.isArray(data.skills)
+        ? data.skills
+        : typeof data.skills === "string"
+        ? data.skills.split(",").map((s) => s.trim()).filter(Boolean)
+        : [];
 
         const updatedUser = await tx.user.update({
           where: { id: user.id },
@@ -86,7 +85,7 @@ export async function updateUser(data) {
       { timeout: 15000 } // Increased timeout to 15 seconds
     );
 
-    // Revalidate both pages that gate on onboarding
+    // 🔹 Step 3: Revalidate affected pages
     revalidatePath("/dashboard");
     revalidatePath("/onboarding");
 
@@ -106,9 +105,6 @@ export async function getUserOnboardingStatus() {
     select: { industry: true },
   });
 
-    console.log("[getUserOnboardingStatus] industry:", user?.industry);
-
-   return { isOnboarded: !!user?.industry };
+  console.log("[getUserOnboardingStatus] industry:", user?.industry);
+  return { isOnboarded: !!user?.industry };
 }
-
-
