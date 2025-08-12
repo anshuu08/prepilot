@@ -16,38 +16,54 @@ export async function updateUser(data) {
   });
   if (!user) throw new Error("User not found");
 
-  let industrySlug =
-    typeof data.industry === "string" && data.industry.trim() !== ""
-      ? data.industry.trim()
-      : null;
-
-  let insights = null;
-
-  // 🔹 Step 1: Only call AI API if industry is provided and not already in DB
-  if (industrySlug) {
-    const existingInsight = await db.industryInsight.findUnique({
-      where: { industry: industrySlug },
-    });
-
-    if (!existingInsight) {
-      console.log("[updateUser] generating new AI insights for:", industrySlug);
-      insights = await generateAIInsights(industrySlug); // slow call happens OUTSIDE transaction
-    }
-  }
-
-  // 🔹 Step 2: Run fast DB-only transaction
   try {
-    await db.$transaction(async (tx) => {
-      if (industrySlug && insights) {
-        await tx.industryInsight.create({
-          data: {
-            industry: industrySlug,
-            ...insights,
-            nextUpdate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-          },
-        });
-        console.log("[updateUser] created new industryInsight for:", industrySlug);
+    let industrySlug = (typeof data.industry === "string" && data.industry.trim() !== "") ? data.industry.trim() : null;
+    console.log("[updateUser] using industrySlug:", industrySlug);
+
+    // Generate AI insights outside of transaction if needed
+    let insights = null;
+    if (industrySlug) {
+      const existingInsight = await db.industryInsight.findUnique({
+        where: { industry: industrySlug },
+      });
+      console.log("[updateUser] found existing industryInsight:", !!existingInsight);
+
+      if (!existingInsight) {
+        console.log("[updateUser] generating AI insights for:", industrySlug);
+        try {
+          insights = await generateAIInsights(industrySlug);
+          console.log("[updateUser] AI insights generated successfully");
+        } catch (aiError) {
+          console.error("[updateUser] AI generation failed:", aiError.message);
+          // Continue without insights - the transaction will handle the fallback
+          insights = null;
+        }
       }
+    }
+
+    // Now run the database operations in a transaction
+    await db.$transaction(
+      async (tx) => {
+        // Create industry insight if we generated one
+        if (insights && industrySlug) {
+          try {
+            await tx.industryInsight.create({
+              data: {
+                industry: industrySlug,
+                ...insights,
+                nextUpdate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+              },
+            });
+            console.log("[updateUser] created new industryInsight for:", industrySlug);
+          } catch (createError) {
+            // Handle race condition where another request created the insight
+            if (createError.code === 'P2002') {
+              console.log("[updateUser] industryInsight already exists (race condition), continuing...");
+            } else {
+              throw createError;
+            }
+          }
+        }
 
       const skillsArray = Array.isArray(data.skills)
         ? data.skills
@@ -55,17 +71,19 @@ export async function updateUser(data) {
         ? data.skills.split(",").map((s) => s.trim()).filter(Boolean)
         : [];
 
-      const updatedUser = await tx.user.update({
-        where: { id: user.id },
-        data: {
-          industry: industrySlug,
-          experience: data.experience ?? null,
-          bio: data.bio?.trim() || "",
-          skills: skillsArray,
-        },
-      });
-      console.log("[updateUser] updated user industry to:", updatedUser.industry);
-    }, { timeout: 10000 });
+        const updatedUser = await tx.user.update({
+          where: { id: user.id },
+          data: {
+            industry: industrySlug,                // null if empty
+            experience: data.experience ?? null,   // normalize
+            bio: data.bio?.trim() || "",
+            skills: skillsArray,
+          },
+        });
+        console.log("[updateUser] updated user industry to:", updatedUser.industry);
+      },
+      { timeout: 15000 } // Increased timeout to 15 seconds
+    );
 
     // 🔹 Step 3: Revalidate affected pages
     revalidatePath("/dashboard");

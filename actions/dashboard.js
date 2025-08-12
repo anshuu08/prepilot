@@ -7,7 +7,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-export async function generateAIInsights(industry, retries = 3, delay = 1000) {
+export async function generateAIInsights(industry, retries = 2, delay = 500) {
   const prompt = `
     Analyze the current state of the ${industry} industry and provide insights in ONLY the following JSON format without any additional notes or explanations:
     {
@@ -29,21 +29,49 @@ export async function generateAIInsights(industry, retries = 3, delay = 1000) {
   `;
 
   try {
-    const result = await model.generateContent(prompt);
+    // Add a timeout to prevent hanging
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('AI generation timeout')), 8000)
+    );
+    
+    const generationPromise = model.generateContent(prompt);
+    
+    const result = await Promise.race([generationPromise, timeoutPromise]);
     const response = result.response;
     const text = response.text();
     const cleanedText = text.replace(/```(?:json)?\n?/g, "").trim();
     return JSON.parse(cleanedText);
   } catch (error) {
-    if (error.status === 503 && retries > 0) {
+    if ((error.status === 503 || error.message === 'AI generation timeout') && retries > 0) {
       console.warn(
-        `503 received, retrying generateAIInsights for "${industry}" after ${delay}ms... (${retries} retries left)`
+        `${error.status === 503 ? '503' : 'Timeout'} received, retrying generateAIInsights for "${industry}" after ${delay}ms... (${retries} retries left)`
       );
       await new Promise((res) => setTimeout(res, delay));
-      return generateAIInsights(industry, retries - 1, delay * 2);
+      return generateAIInsights(industry, retries - 1, delay * 1.5);
     }
-    throw error;
+    
+    // If all retries failed or it's a different error, return fallback data
+    console.warn(`Failed to generate AI insights for "${industry}", using fallback data:`, error.message);
+    return getFallbackInsights(industry);
   }
+}
+
+function getFallbackInsights(industry) {
+  return {
+    salaryRanges: [
+      { role: "Entry Level", min: 40000, max: 60000, median: 50000, location: "General" },
+      { role: "Mid Level", min: 60000, max: 90000, median: 75000, location: "General" },
+      { role: "Senior Level", min: 90000, max: 130000, median: 110000, location: "General" },
+      { role: "Manager", min: 100000, max: 150000, median: 125000, location: "General" },
+      { role: "Director", min: 150000, max: 200000, median: 175000, location: "General" }
+    ],
+    growthRate: 5.0,
+    demandLevel: "Medium",
+    topSkills: ["Communication", "Problem Solving", "Technical Skills", "Leadership", "Industry Knowledge"],
+    marketOutlook: "Neutral",
+    keyTrends: ["Digital Transformation", "Remote Work", "Automation", "Sustainability", "Data Analytics"],
+    recommendedSkills: ["Digital Literacy", "Adaptability", "Data Analysis", "Project Management", "Collaboration"]
+  };
 }
 
 function normalizeInsights(data) {
@@ -72,21 +100,32 @@ export async function getIndustryInsights() {
 
   if (!user) throw new Error("User not found");
 
+  // If user hasn't set an industry, return null
+  if (!user.industry) {
+    console.log("User has no industry set");
+    return null;
+  }
+
   // If no insights exist, generate them
   if (!user.industryInsight) {
-    const insights = await generateAIInsights(user.industry);
+    try {
+      const insights = await generateAIInsights(user.industry);
 
-    const industryInsight = await db.industryInsight.create({
-      data: {
-        industry: user.industry,
-        ...insights,
-        nextUpdate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-      },
-    });
+      const industryInsight = await db.industryInsight.create({
+        data: {
+          industry: user.industry,
+          ...insights,
+          nextUpdate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        },
+      });
 
-     console.log("Saved industryInsight:", industryInsight);
-
-    return normalizeInsights(industryInsight);
+      console.log("Saved industryInsight:", industryInsight);
+      return normalizeInsights(industryInsight);
+    } catch (error) {
+      console.error("Failed to generate or save industry insights:", error);
+      // Return fallback insights if AI generation fails
+      return normalizeInsights(getFallbackInsights(user.industry));
+    }
   }
 
   console.log("Returning existing insight:", user.industryInsight);
